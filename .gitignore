@@ -1,0 +1,41 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# PyCharm
+.idea/
+
+# Environment variables / secrets
+.env
+*.env
+
+# Logs
+*.log
+logs/
+
+# Data files
+data/
+datasets/
+*.csv
+*.xlsx
+*.xls
+*.db
+*.sqlite
+
+# Model / checkpoint files
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.joblib
+*.onnx
+
+# OS files
+.DS_Store
+Thumbs.db
