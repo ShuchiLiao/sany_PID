@@ -69,7 +69,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 # 复用你上传的参数类（PlantParams / ValveParams / SimulationConfig）
-from sim_config import PlantParams, ValveParams, SimulationConfig
+from scripts.core.sim_config import PlantParams, ValveParams, SimulationConfig
 
 
 # ----------------------------

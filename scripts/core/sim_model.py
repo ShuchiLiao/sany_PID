@@ -18,7 +18,7 @@ from typing import Dict
 from dataclasses import dataclass
 import numpy as np
 import copy
-from sim_config import PlantParams, ValveParams, PhysicalConstraintError, MassBalanceError, NumericalError
+from scripts.core.sim_config import PlantParams, ValveParams, PhysicalConstraintError, MassBalanceError, NumericalError
 
 
 # ============================================================================ #

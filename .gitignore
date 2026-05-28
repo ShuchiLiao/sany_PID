@@ -20,13 +20,13 @@ env/
 logs/
 
 # Data files
-data/
-datasets/
+outputs/
 *.csv
 *.xlsx
 *.xls
 *.db
 *.sqlite
+sim_runs/
 
 # Model / checkpoint files
 *.pt

@@ -55,7 +55,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import re
 
-from modes import (
+from scripts.rl.modes import (
     EpisodeParams,
     Trajectory,
     ModeSpec,
@@ -66,12 +66,12 @@ from modes import (
     production_reward
 )
 
-from PPO_bandit import PPOBanditAgent, PPOConfig
+from scripts.rl.PPO_bandit import PPOBanditAgent, PPOConfig
 
-from sim_config import PlantParams, ValveParams, SimulationConfig, PhysicalConstraintError
-from sim_env import CementingSimEnv
-from sim_model import SlurryState
-from tune_baseline_v3 import opening_to_flow
+from scripts.core.sim_config import PlantParams, ValveParams, SimulationConfig, PhysicalConstraintError
+from scripts.core.sim_env import CementingSimEnv
+from scripts.core.sim_model import SlurryState
+from scripts.PID_control.tune_baseline import opening_to_flow
 from copy import deepcopy
 
 # -----------------------------

@@ -10,9 +10,9 @@ sim_env.py
 
 # import logging
 # from tqdm import tqdm
-from sim_model import SlurryState, SlurryTankModel, RK4Integrator, ValveActuator
-from sim_config import PlantParams, ValveParams, SimulationConfig, SimulationLogger, MassBalanceError, StepLogEntry
-from PIDcontroller import PIDController
+from scripts.core.sim_model import SlurryState, SlurryTankModel, RK4Integrator, ValveActuator
+from scripts.core.sim_config import PlantParams, ValveParams, SimulationConfig, SimulationLogger, MassBalanceError, StepLogEntry
+from scripts.PID_control.PIDcontroller import PIDController
 from collections import deque
 
 

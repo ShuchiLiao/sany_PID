@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from sim_config import PlantParams, ValveParams, SimulationConfig
-from sim_model import SlurryState
-from sim_env import CementingSimEnv
+from scripts.core.sim_config import PlantParams, ValveParams, SimulationConfig
+from scripts.core.sim_model import SlurryState
+from scripts.core.sim_env import CementingSimEnv
 
 
 # =============================================================================

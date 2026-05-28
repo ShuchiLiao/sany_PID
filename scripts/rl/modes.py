@@ -23,7 +23,7 @@ import numpy as np
 from copy import deepcopy
 
 # tune_baseline_v3 里提供了“按工况粗算 base PID + FF”的函数
-from tune_baseline_v3 import (
+from scripts.PID_control.tune_baseline import (
     tune_baseline_params,          # production base
     tune_premix_base_params,        # premix base
     EngineeringKnobs,
@@ -33,7 +33,7 @@ from tune_baseline_v3 import (
 )
 
 # sim_config 里是 PlantParams / SimulationConfig / ValveParams
-from sim_config import PlantParams, SimulationConfig, ValveParams
+from scripts.core.sim_config import PlantParams, SimulationConfig, ValveParams
 
 # -----------------------------
 # Data containers

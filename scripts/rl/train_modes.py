@@ -43,9 +43,9 @@ from modes import (
 )
 
 from PPO_bandit import PPOBanditAgent, PPOConfig, RolloutBuffer
-from sim_config import PlantParams, ValveParams, SimulationConfig, PhysicalConstraintError
-from sim_env import CementingSimEnv
-from sim_model import SlurryState
+from scripts.core.sim_config import PlantParams, ValveParams, SimulationConfig, PhysicalConstraintError
+from scripts.core.sim_env import CementingSimEnv
+from scripts.core.sim_model import SlurryState
 
 # matplotlib 仅用于作图；若你希望无图形依赖，可删掉并自行实现保存逻辑
 import matplotlib.pyplot as plt
