@@ -251,7 +251,7 @@ def tune_premix_base_params(
     V = A * h_used
 
     # 阀门线性段 slope_c（m^3/s per %）
-    slope_c = _ensure_linear_slope(cement_valve_params)
+    slope_c = valve_linear_slope(cement_valve_params)
     if slope_c <= 1e-12:
         # 退化：无法从开度产生有效流量
         return PremixTuningResult(
@@ -357,8 +357,8 @@ def tune_baseline_params(
     # --- 3) 开度域“水->灰”耦合前馈系数 kff ---
     # 目标：当水阀因液位扰动产生 Δuw 时，灰阀同步给 Δuc ≈ kff * Δuw，
     #      使得 ΔQc ≈ r * ΔQw，从而尽量保持配比。
-    slope_w = _ensure_linear_slope(water_valve_params)
-    slope_c = _ensure_linear_slope(cement_valve_params)
+    slope_w = valve_linear_slope(water_valve_params)
+    slope_c = valve_linear_slope(cement_valve_params)
     if slope_c <= 1e-12:
         kff = 0.0
     else:

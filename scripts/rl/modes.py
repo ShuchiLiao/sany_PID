@@ -22,8 +22,8 @@ import numpy as np
 # --- NEW: base-parameter computation (scenario -> base PID/FF) ---
 from copy import deepcopy
 
-# tune_baseline_v3 里提供了“按工况粗算 base PID + FF”的函数
-from scripts.PID_control.tune_baseline import (
+# baseline 里提供了“按工况粗算 base PID + FF”的函数
+from scripts.PID_control.baseline import (
     tune_baseline_params,          # production base
     tune_premix_base_params,        # premix base
     EngineeringKnobs,
@@ -101,7 +101,7 @@ def _make_tuning_objects_from_episode(
     cement_valve_params_template:Optional[ValveParams] = None,
 ) -> tuple[PlantParams, SimulationConfig, ValveParams, ValveParams]:
     """
-    用 EpisodeParams 覆盖/构造 tune_baseline_v3 所需的 PlantParams / SimulationConfig：
+    用 EpisodeParams 覆盖/构造 baseline 所需的 PlantParams / SimulationConfig：
     - plant.tau_mix_hat <- p.tau_mix
     - sim.rho_obs_delay <- p.tau_delay
     - sim.rho_sp/h_sp/dt/t_end <- episode 对应值
@@ -112,7 +112,7 @@ def _make_tuning_objects_from_episode(
     cv_params = deepcopy(cement_valve_params_template) if cement_valve_params_template is not None else ValveParams()
 
 
-    # 工况覆盖（这几项就是 tune_baseline_v3 用到的关键量）
+    # 工况覆盖（这几项就是 baseline 用到的关键量）
     plant.tau_mix_hat = float(p.tau_mix)
 
     sim.dt = float(p.dt)
@@ -140,7 +140,7 @@ def compute_base_premix(
     premix_knobs: Optional[PremixKnobs] = None,
 ) -> BaseParamsPremix:
     """
-    premix base：复用 tune_baseline_v3.tune_premix_base_params() 的逻辑。
+    premix base：复用 baseline.tune_premix_base_params() 的逻辑。
     h_level 推荐用 h_sp（也可用 h0）；这里取 max(h0, h_sp) 更稳一点。
     """
     assert p.mode == "premix"
@@ -176,7 +176,7 @@ def compute_base_production(
     eng_knobs: Optional[EngineeringKnobs] = None,
 ) -> BaseParamsProduction:
     """
-    production base：复用 tune_baseline_v3.tune_baseline_params() 的逻辑。
+    production base：复用 baseline.tune_baseline_params() 的逻辑。
     Qs_step 取“阶跃后的目标排量”更贴近你生产阶段的稳态工作点：优先用 qs1，否则退回 qs0。
     """
     assert p.mode == "production"

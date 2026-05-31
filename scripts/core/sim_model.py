@@ -20,6 +20,42 @@ import numpy as np
 import copy
 from scripts.core.sim_config import PlantParams, ValveParams, PhysicalConstraintError, MassBalanceError, NumericalError
 
+# ----------------------------
+# Valve opening / flow helpers
+# ----------------------------
+
+def valve_linear_slope(v: ValveParams) -> float:
+    """返回阀门线性段斜率 slope [m^3/s per %]。"""
+    if v.linear_slope is not None:
+        return float(v.linear_slope)
+
+    denom = float(v.opening_max - v.dead_zone_opening)
+    if denom <= 0:
+        raise ValueError("Invalid valve params: opening_max must be > dead_zone_opening.")
+    return float(v.max_flow) / denom
+
+
+def flow_to_opening(Q: float, v: ValveParams) -> float:
+    """将期望流量 Q [m^3/s] 转为阀门开度 [%]。"""
+    slope = valve_linear_slope(v)
+    if slope <= 0:
+        return float(v.opening_min)
+
+    opening = float(v.dead_zone_opening) + (float(Q) - float(v.linear_offset)) / slope
+    opening = max(float(v.opening_min), min(float(v.opening_max), opening))
+    return float(opening)
+
+
+def opening_to_flow(opening: float, v: ValveParams) -> float:
+    """将阀门开度 [%] 转为近似流量 Q [m^3/s]。"""
+    op = float(opening)
+    if op < float(v.dead_zone_opening):
+        return 0.0
+
+    slope = valve_linear_slope(v)
+    Q = slope * (op - float(v.dead_zone_opening)) + float(v.linear_offset)
+    return float(Q)
+
 
 # ============================================================================ #
 # 一、ValveActuator: 模拟阀门控制

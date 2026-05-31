@@ -27,6 +27,9 @@ outputs/
 *.db
 *.sqlite
 sim_runs/
+paper/
+crash_logs/
+
 
 # Model / checkpoint files
 *.pt
