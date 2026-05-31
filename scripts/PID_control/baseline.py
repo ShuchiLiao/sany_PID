@@ -70,45 +70,7 @@ from typing import Optional
 
 # 复用你上传的参数类（PlantParams / ValveParams / SimulationConfig）
 from scripts.core.sim_config import PlantParams, ValveParams, SimulationConfig
-
-
-# ----------------------------
-# 工具函数：阀门线性段 slope
-# ----------------------------
-
-def _ensure_linear_slope(v: ValveParams) -> float:
-    """返回阀门线性段斜率 slope [m^3/s per %]，若未提供则按 max_flow 推导。"""
-    if v.linear_slope is not None:
-        return float(v.linear_slope)
-    denom = float(v.opening_max - v.dead_zone_opening)
-    if denom <= 0:
-        raise ValueError("Invalid valve params: opening_max must be > dead_zone_opening.")
-    return float(v.max_flow) / denom
-
-
-def flow_to_opening(Q: float, v: ValveParams) -> float:
-    """将期望流量 Q [m^3/s] 转为阀门开度 [%]（按线性段反求，并裁剪到 [opening_min, opening_max]）。"""
-    slope = _ensure_linear_slope(v)
-    if slope <= 0:
-        # 极端情况下（无有效斜率）只能全关
-        return float(v.opening_min)
-
-    opening = float(v.dead_zone_opening) + (float(Q) - float(v.linear_offset)) / slope
-    # 裁剪
-    opening = max(float(v.opening_min), min(float(v.opening_max), opening))
-    return opening
-
-
-def opening_to_flow(opening: float, v: ValveParams) -> float:
-    """将阀门开度 [%] 转为近似流量 Q [m^3/s]（线性段 + 死区裁剪）。"""
-    op = float(opening)
-    if op < float(v.dead_zone_opening):
-        return 0.0
-    slope = _ensure_linear_slope(v)
-    Q = slope * (op - float(v.dead_zone_opening)) + float(v.linear_offset)
-    return Q
-
-
+from scripts.core.sim_model import valve_linear_slope, flow_to_opening, opening_to_flow
 # ----------------------------
 # 粗整定函数（核心）
 # ----------------------------
