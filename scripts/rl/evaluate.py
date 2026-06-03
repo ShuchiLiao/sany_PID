@@ -239,7 +239,7 @@ def _scenario_row(i: int, p: Any, uncertainty: Mapping[str, Any]) -> Dict[str, f
 
 def run_paired_comparison(
     mode: ModeSpec,
-    agent: Optional[PPOBanditAgent],
+    agent: PPOBanditAgent,
     *,
     N: int,
     seed: int,
@@ -271,10 +271,8 @@ def run_paired_comparison(
         base_params = mode.compute_base_params(p)
         obs = mode.build_context(p)
 
-        if agent is None:
-            r_scales = b_scales.copy()
-        else:
-            r_scales = agent_scales(agent, mode, obs)
+
+        r_scales = agent_scales(agent, mode, obs)
 
         traj_b = simulate_episode_with_uncertainty(
             p,
@@ -426,7 +424,6 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--premix_duration", type=float, default=400.0)
     ap.add_argument("--premix_hold", type=float, default=10.0)
     ap.add_argument("--production_duration", type=float, default=600.0)
-    ap.add_argument("--baseline_only", action="store_true", help="Run baseline-vs-baseline paired pipeline without loading a checkpoint")
     ap.add_argument("--bootstrap_B", type=int, default=2000)
     ap.add_argument("--save_full_if_n_le", type=int, default=4)
     ap.add_argument("--no_plots", action="store_true")
@@ -451,11 +448,11 @@ def main() -> None:
             production_duration=float(args.production_duration),
         )
         ckpt_path = args.ckpt or os.path.join(args.ckpt_dir, f"{mode.name}_best.pt")
-        agent: Optional[PPOBanditAgent] = None
-        if not args.baseline_only:
-            if not os.path.exists(ckpt_path):
-                raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}. Use --baseline_only to validate the baseline pipeline.")
-            agent = load_agent_from_checkpoint(mode, ckpt_path, device=args.device)
+
+        if not os.path.exists(ckpt_path):
+            raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+
+        agent = load_agent_from_checkpoint(mode, ckpt_path, device=args.device)
 
         out_dir = ensure_dir(os.path.join(args.out_dir, mode.name))
         report = run_paired_comparison(
@@ -469,9 +466,20 @@ def main() -> None:
             save_full_if_n_le=int(args.save_full_if_n_le),
             make_plots=not bool(args.no_plots),
         )
-        report["checkpoint"] = None if args.baseline_only else ckpt_path
+        report["checkpoint"] = ckpt_path
         all_reports.append(report)
-        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+        pr = report.get("paired_return", {})
+        br = report.get("baseline_return", {})
+        rr = report.get("rl_return", {})
+
+        print(
+            f"[{mode.name}] "
+            f"baseline_R_mean={br.get('baseline_R_mean', float('nan')):.6g}, "
+            f"candidate_R_mean={rr.get('rl_R_mean', float('nan')):.6g}, "
+            f"delta_mean={pr.get('return_delta_mean', float('nan')):.6g}, "
+            f"win_rate={pr.get('return_win_rate', float('nan')):.3f}, "
+            f"summary={report.get('summary_path')}"
+        )
 
     ensure_dir(args.out_dir)
     save_json(os.path.join(args.out_dir, "paired_compare_summary_all.json"), all_reports)
