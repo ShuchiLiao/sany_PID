@@ -12,8 +12,8 @@ It does not retrain any model. It loads trained checkpoints and reuses the
 existing paired baseline-vs-RL simulation pipeline.
 
 Run from the repository root, for example:
-    python -m scripts.rl.reviewer_lightweight_experiments --mode both --premix_ckpt outputs/premix_train/seed1/premix_best.pt --production_ckpt outputs/production_train/seed1/production_best.pt --N 1000 --device cuda --dt 0.5 --premix_duration 120 --premix_hold 10 --production_duration 240 --timing_repeats 10000 --out_dir outputs/reviewer_lightweight
-    python -m scripts.rl.reviewer_lightweight_experiments --mode production --ckpt outputs/production_train/seed2/production_best.pt --N 1000 --device cpu --dt 0.5 --production_duration 240 --out_dir outputs/reviewer_lightweight/production_seed2
+    python -m scripts.rl.reviewer_lightweight_experiments --mode both --premix_ckpt outputs/premix_train/seed3/premix_best.pt --production_ckpt outputs/production_train/seed3/production_best.pt --N 1000 --device cuda --dt 0.5 --premix_duration 120 --premix_hold 10 --production_duration 240 --timing_repeats 10000 --out_dir outputs/reviewer_lightweight
+    python -m scripts.rl.reviewer_lightweight_experiments --mode production --ckpt outputs/production_train/seed3/production_best.pt --N 1000 --device cpu --dt 0.5 --production_duration 240 --out_dir outputs/reviewer_lightweight/production_seed3
 """
 
 from __future__ import annotations
@@ -302,7 +302,20 @@ def run_for_mode(mode_name: str, args: argparse.Namespace) -> Dict[str, Any]:
             rows, summary = paired_ood_one_case(mode, agent, case_name=case_name, N=args.N, seed=args.seed + 1000 + j, dt=args.dt)
             all_rows.extend(rows)
             summaries.append(summary)
-            print(f"[{mode_name}:{case_name}] rho IAE median improvement={summary['improve_IAE_rho_median']:.6g}, win_rate={summary['rho_IAE_win_rate']:.3f}")
+            if mode_name == "production":
+                print(
+                    f"[{mode_name}:{case_name}] "
+                    f"rho IAE median improvement={summary['improve_IAE_rho_median']:.6g}, "
+                    f"rho win_rate={summary['rho_IAE_win_rate']:.3f}; "
+                    f"h IAE median improvement={summary['improve_IAE_h_median']:.6g}, "
+                    f"h win_rate={summary['h_IAE_win_rate']:.3f}"
+                )
+            else:
+                print(
+                    f"[{mode_name}:{case_name}] "
+                    f"rho IAE median improvement={summary['improve_IAE_rho_median']:.6g}, "
+                    f"rho win_rate={summary['rho_IAE_win_rate']:.3f}"
+                )
 
         result["ood_summaries"] = summaries
         write_csv(out_dir / f"{mode_name}_ood_cases.csv", all_rows)

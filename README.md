@@ -1,290 +1,289 @@
 # sany_PID
 
-`sany_PID` 是一个面向固井连续混浆过程的仿真与控制实验项目。项目主要包含三部分：第一，建立水泥浆连续混合过程的仿真模型；第二，构建 PID / FF 基准控制方法；第三，使用 PPO-bandit 对基准控制参数进行缩放整定，并通过配对仿真评估与基准方法的差异。
+`sany_PID` 用于研究轻量级强化学习策略对传统 PID 参数整定的辅助作用。项目以水泥浆密度控制过程为对象，包含两类运行情景：预混情景和生产情景。代码围绕“仿真建模—基准 PID 参数计算—PPO-bandit 策略训练—成对评估—补充实验”组织。
 
-当前代码支持两类主要工况：
+本文中的策略网络不是在每个控制周期反复输出控制量，而是在每个运行情景开始前，根据当前工况特征推理一次，输出 PID 参数缩放因子。随后该组 PID 参数在整个情景内保持不变。控制周期内仍由 PID 控制器执行闭环控制。
 
-* `premix`：预混阶段，重点关注水泥浆密度控制；
-* `production`：生产阶段，重点关注水泥浆密度与液位协同控制。
-
-项目的主要运行入口为：
+## 1. 项目结构
 
 ```text
-python -m scripts.rl.train
-python -m scripts.rl.evaluate
+sany_PID/
+├── scripts/
+│   ├── core/
+│   │   ├── sim_config.py
+│   │   ├── sim_model.py
+│   │   └── sim_env.py
+│   ├── PID_control/
+│   │   ├── PIDcontroller.py
+│   │   └── baseline.py
+│   ├── rl/
+│   │   ├── PPO_bandit.py
+│   │   ├── modes.py
+│   │   ├── rollout.py
+│   │   ├── metrics.py
+│   │   ├── plotting.py
+│   │   ├── train.py
+│   │   ├── evaluate.py
+│   │   └── reviewer_lightweight_experiments.py
+│   ├── examples/
+│   │   ├── sim_examples.py
+│   │   └── archive_examples.py
+│   └── legacy/
+│       ├── IMC_PID_tuning.py
+│       ├── evaluate_compare.py
+│       ├── seed_sweep.py
+│       └── train_modes.py
+├── README.md
+└── requirement.txt
 ```
 
-所有命令建议在项目根目录下执行。
+其中推荐使用的主流程代码都位于 `scripts/rl/`、`scripts/core/` 和 `scripts/PID_control/` 中。`scripts/examples/` 用于简单仿真示例。`scripts/legacy/` 是历史版本迁移参考，不作为当前论文实验的推荐运行入口。
 
----
+## 2. 主要模块说明
 
-## 1. 代码结构
+### 2.1 仿真核心模块
 
-当前核心代码位于 `scripts/` 目录下，按功能分为三层。
+`core/sim_config.py` 定义仿真相关配置和参数结构。
+
+`core/sim_model.py` 实现水泥浆罐体、阀门、混合过程、密度响应、液位响应和观测延迟等过程模型。
+
+`core/sim_env.py` 封装闭环仿真环境，用于在给定 PID 参数和工况扰动下运行一个完整控制情景。
+
+### 2.2 PID 与基准参数模块
+
+`PID_control/PIDcontroller.py` 实现 PID 控制器逻辑，包括比例、积分、微分项计算和控制量约束。
+
+`PID_control/baseline.py` 计算传统 PID 参数和前馈参数，作为 RL 策略缩放的基础参数来源。
+
+### 2.3 强化学习模块
+
+`rl/PPO_bandit.py` 实现 PPO-bandit 策略网络。该策略将当前情景特征映射为 PID 参数缩放因子，而不是直接输出每个控制周期的阀门动作。
+
+`rl/modes.py` 定义不同运行情景的任务规格，包括工况采样、特征构造、动作缩放项、基准参数计算和奖励定义。
+
+`rl/rollout.py` 负责单情景仿真、共享不确定性采样、PID 缩放因子应用、奖励计算和轨迹保存。
+
+`rl/metrics.py` 负责控制性能指标计算、成对比较统计、bootstrap 置信区间、CSV/JSON 汇总和多 seed 结果汇总。
+
+`rl/plotting.py` 负责训练曲线、评估分布图、缩放因子图和成对改进图的绘制。
+
+`rl/train.py` 是当前推荐训练入口，支持预混、生产或两种情景同时训练，也支持多 seed 训练和结果汇总。
+
+`rl/evaluate.py` 是当前推荐评估入口，用于加载训练好的 checkpoint，并在相同随机工况下比较 RL 缩放策略和基准 PID 控制器。
+
+`rl/reviewer_lightweight_experiments.py` 用于补充实验，包括单次策略推理耗时测试和训练区间外极端工况泛化测试。
+
+## 3. 两类运行情景
+
+### 3.1 预混情景 `premix`
+
+预混情景主要关注密度跟踪。策略网络根据当前工况特征输出水泥通道 PID 参数缩放因子：
 
 ```text
-scripts/
-├── core/
-│   ├── sim_config.py
-│   ├── sim_model.py
-│   └── sim_env.py
-├── PID_control/
-│   ├── PIDcontroller.py
-│   └── baseline.py
-└── rl/
-    ├── PPO_bandit.py
-    ├── modes.py
-    ├── rollout.py
-    ├── metrics.py
-    ├── plotting.py
-    ├── train.py
-    └── evaluate.py
+s_c_p, s_c_i, s_c_d
 ```
 
-各部分作用如下。
+其中 `c` 表示 cement。评估重点包括密度误差、密度 IAE、控制奖励和相对于基准 PID 的改进。
 
-| 目录 / 文件                                | 作用                                          |
-| -------------------------------------- | ------------------------------------------- |
-| `scripts/core/sim_config.py`           | 定义仿真参数、阀门参数、控制参数等配置                         |
-| `scripts/core/sim_model.py`            | 定义罐体、阀门、混合过程等物理模型                           |
-| `scripts/core/sim_env.py`              | 封装闭环仿真环境                                    |
-| `scripts/PID_control/PIDcontroller.py` | PID 控制器实现                                   |
-| `scripts/PID_control/baseline.py`      | 基准 PID / FF 参数整定                            |
-| `scripts/rl/PPO_bandit.py`             | PPO-bandit 算法主体                             |
-| `scripts/rl/modes.py`                  | 定义 `premix` 与 `production` 两类任务模式           |
-| `scripts/rl/rollout.py`                | episode 仿真、共享扰动、轨迹生成                        |
-| `scripts/rl/metrics.py`                | 控制指标、配对统计、bootstrap、多 seed 汇总               |
-| `scripts/rl/plotting.py`               | 训练曲线、评估图、配对对比图                              |
-| `scripts/rl/train.py`                  | 训练入口，支持单 seed 和多 seed                       |
-| `scripts/rl/evaluate.py`               | 评估入口，支持 baseline-only 和 baseline vs RL 配对比较 |
+### 3.2 生产情景 `production`
 
----
-
-## 2. 环境准备
-
-建议使用 Python 3.10 或更高版本。
-
-如果使用 conda，可先创建并激活环境：
-
-```bash
-conda create -n sany python=3.10 -y
-```
-
-```bash
-conda activate sany
-```
-
-安装依赖：
-
-```bash
-python -m pip install -U pip
-```
-
-```bash
-python -m pip install numpy scipy matplotlib torch
-```
-
-如果使用 GPU 训练，请根据本机 CUDA 版本安装对应的 PyTorch 版本。CPU 训练可以直接使用上述安装方式。
-
----
-
-## 3. 基本检查
-
-首次运行前，建议先检查代码是否可以正常编译：
-
-```bash
-python -m compileall scripts/core scripts/PID_control scripts/rl
-```
-
-如果该命令没有报错，说明 Python 语法和基础导入链路基本正常。
-
----
-
-## 4. 训练入口
-
-训练统一使用：
+生产情景同时关注液位控制和密度控制。策略网络输出水通道和水泥通道的 PID 参数缩放因子：
 
 ```text
-python -m scripts.rl.train
+s_w_p, s_w_i, s_w_d, s_c_p, s_c_i, s_c_d
 ```
 
-训练入口支持单 seed 训练，也支持多 seed 批量训练。
+其中 `w` 表示 water，`c` 表示 cement。评估重点包括液位 IAE、密度 IAE、综合控制奖励和相对于基准 PID 的改进。
 
----
+## 4. 推荐运行顺序
 
-## 5. premix 正式训练示例
+建议从项目根目录运行所有命令。
 
-`premix` 工况主要用于预混阶段密度控制。正式实验建议使用多 seed 训练，以减少单一随机种子的偶然性。
+推荐顺序如下：
 
-推荐命令如下：
+```text
+1. 训练预混情景策略
+2. 训练生产情景策略
+3. 汇总多 seed 训练结果
+4. 对最佳 checkpoint 进行成对评估
+5. 运行补充实验
+```
+
+## 5. 策略训练
+
+### 5.1 训练预混情景
 
 ```bash
-python -m scripts.rl.train --mode premix --seeds 1 2 3 4 5 --device cuda --updates 1000 --batch_episodes 64 --eval_every 20 --eval_episodes 100 --save_every 50 --num_workers 4 --dt 0.5 --premix_duration 120 --premix_hold 10 --ckpt_dir outputs/premix_train
+python -m scripts.rl.train \
+  --mode premix \
+  --seeds 1 2 3 4 5 \
+  --device cuda \
+  --updates 1000 \
+  --batch_episodes 64 \
+  --eval_every 20 \
+  --eval_episodes 100 \
+  --save_every 50 \
+  --num_workers 4 \
+  --dt 0.5 \
+  --premix_duration 120 \
+  --premix_hold 10 \
+  --ckpt_dir outputs/premix_train
 ```
 
-参数说明如下。
+### 5.2 训练生产情景
 
-| 参数                                | 含义                         | 推荐设置                             |
-| --------------------------------- | -------------------------- | -------------------------------- |
-| `--mode premix`                   | 指定训练 premix 工况             | premix 实验固定使用 `premix`           |
-| `--seeds 1 2 3 4 5`               | 多随机种子训练                    | 正式实验建议至少 5 个 seed                |
-| `--device cuda`                    | 训练设备                       | 无 GPU 时用 `cpu`；有 CUDA 时可用 `cuda` |
-| `--updates 1000`                  | PPO 参数更新次数                 | 正式实验建议 1000–3000 起步              |
-| `--batch_episodes 64`             | 每次 update 采样的 episode 数    | 推荐 64；计算资源充足可设 128               |
-| `--eval_every 20`                 | 每隔多少次 update 做一次评估         | 推荐 20；训练较长时可设 50                 |
-| `--eval_episodes 100`             | 每次评估使用的 episode 数          | 推荐 100；正式结果可设 200                |
-| `--save_every 50`                 | 每隔多少次 update 保存 checkpoint | 推荐 50 或 100                      |
-| `--num_workers 4`                 | 并行 rollout worker 数量       | CPU 核数较少可设 0 或 2；多核机器可设 4–8      |
-| `--dt 0.5`                        | 仿真步长                       | 推荐与论文/实验设定保持一致，通常可用 0.5          |
-| `--premix_duration 120`           | premix 单次仿真时长              | 推荐 120 s；如需覆盖更长动态可设 180 s        |
-| `--premix_hold 10`                | premix 初始保持时长              | 推荐 5–10 s                        |
-| `--ckpt_dir outputs/premix_train` | checkpoint 和训练结果输出目录       | 推荐放在 `outputs/` 下                |
+```bash
+python -m scripts.rl.train \
+  --mode production \
+  --seeds 1 2 3 4 5 \
+  --device cuda \
+  --updates 1500 \
+  --batch_episodes 64 \
+  --eval_every 20 \
+  --eval_episodes 100 \
+  --save_every 50 \
+  --num_workers 4 \
+  --dt 0.5 \
+  --production_duration 240 \
+  --ckpt_dir outputs/production_train
+```
 
-运行后，典型输出包括：
+### 5.3 同时训练两类情景
+
+如果希望在同一次命令中训练预混和生产情景，可以使用：
+
+```bash
+python -m scripts.rl.train \
+  --mode both \
+  --seeds 1 2 3 4 5 \
+  --device cuda \
+  --updates 1000 \
+  --batch_episodes 64 \
+  --eval_every 20 \
+  --eval_episodes 100 \
+  --save_every 50 \
+  --num_workers 4 \
+  --dt 0.5 \
+  --premix_duration 120 \
+  --premix_hold 10 \
+  --production_duration 240 \
+  --ckpt_dir outputs/both_train
+```
+
+单独训练两类情景时，输出目录更清晰；同时训练适合快速批量实验。
+
+## 6. 训练输出
+
+多 seed 训练后，典型输出结构如下：
 
 ```text
 outputs/premix_train/
 ├── seed1/
+│   ├── premix_best.pt
+│   ├── premix_ppo_bandit_00050.pt
+│   ├── premix_ppo_bandit_00100.pt
+│   └── plots/
+│       ├── premix_seed1_summary.json
+│       ├── premix_seed1_metrics_series.npz
+│       └── *.png
 ├── seed2/
 ├── seed3/
 ├── seed4/
 ├── seed5/
 ├── train_summary_all.json
 └── seed_sweep_summary/
+    ├── seed_sweep_table.csv
+    ├── seed_sweep_summary.json
+    └── seed_sweep_boxplot.png
 ```
 
-每个 seed 子目录中通常包括：
+生产情景输出结构类似，文件名前缀由 `premix` 替换为 `production`。
 
-```text
-premix_best.pt
-premix_ppo_bandit_*.pt
-plots/premix_seed*_summary.json
-plots/premix_seed*_metrics_series.npz
-plots/*.png
-```
+主要文件含义如下：
 
----
+| 文件 | 含义 |
+|---|---|
+| `*_best.pt` | 训练过程中按照指定指标保存的最佳策略 checkpoint |
+| `*_ppo_bandit_*.pt` | 周期性保存的策略 checkpoint |
+| `*_seed*_summary.json` | 单个 seed 的训练与最终评估摘要 |
+| `*_seed*_metrics_series.npz` | 训练过程中的奖励、评估指标和损失序列 |
+| `train_summary_all.json` | 当前训练命令下所有 seed 和 mode 的总汇总 |
+| `seed_sweep_table.csv` | 多 seed 结果表 |
+| `seed_sweep_summary.json` | 多 seed 均值、标准差、最优 seed 等摘要 |
+| `seed_sweep_boxplot.png` | 多 seed 指标分布图 |
 
-## 6. production 正式训练示例
+## 7. 多 seed 结果汇总
 
-`production` 工况用于生产阶段密度与液位协同控制。由于 production 状态维度和控制目标更多，训练通常比 premix 更复杂。
+训练脚本在多 seed 运行结束后会自动生成汇总结果。如果需要单独重新汇总，可以使用 `--summarize_only`。
 
-推荐命令如下：
+### 7.1 汇总预混训练结果
 
 ```bash
-python -m scripts.rl.train --mode production --seeds 1 2 3 4 5 --device cuda --updates 1500 --batch_episodes 64 --eval_every 20 --eval_episodes 100 --save_every 50 --num_workers 4 --dt 0.5 --production_duration 240 --ckpt_dir outputs/production_train
+python -m scripts.rl.train \
+  --summarize_only \
+  --summary_root outputs/premix_train \
+  --summary_metric eval_metrics.R_mean \
+  --summary_out_dir outputs/premix_train/seed_sweep_summary_manual
 ```
 
-参数说明如下。
-
-| 参数                                    | 含义                      | 推荐设置                             |
-| ------------------------------------- | ----------------------- | -------------------------------- |
-| `--mode production`                   | 指定训练 production 工况      | production 实验固定使用 `production`   |
-| `--seeds 1 2 3 4 5`                   | 多随机种子训练                 | 正式实验建议至少 5 个 seed                |
-| `--device cuda`                        | 训练设备                    | 无 GPU 时用 `cpu`；有 CUDA 时可用 `cuda` |
-| `--updates 1500`                      | PPO 参数更新次数              | production 推荐 1500–3000          |
-| `--batch_episodes 64`                 | 每次 update 采样的 episode 数 | 推荐 64；计算资源充足可设 128               |
-| `--eval_every 20`                     | 每隔多少次 update 做一次评估      | 推荐 20 或 50                       |
-| `--eval_episodes 100`                 | 每次评估使用的 episode 数       | 推荐 100；正式结果可设 200                |
-| `--save_every 50`                     | checkpoint 保存间隔         | 推荐 50 或 100                      |
-| `--num_workers 4`                     | 并行 rollout worker 数量    | 推荐 4；单机资源有限可设 0 或 2              |
-| `--dt 0.5`                            | 仿真步长                    | 推荐与论文/实验设定保持一致，通常可用 0.5          |
-| `--production_duration 240`           | production 单次仿真时长       | 推荐 240 s；如需覆盖更长工况可设 300 s        |
-| `--ckpt_dir outputs/production_train` | 输出目录                    | 推荐放在 `outputs/` 下                |
-
-运行后，典型输出包括：
-
-```text
-outputs/production_train/
-├── seed1/
-├── seed2/
-├── seed3/
-├── seed4/
-├── seed5/
-├── train_summary_all.json
-└── seed_sweep_summary/
-```
-
----
-
-## 7. 多 seed 汇总
-
-多 seed 训练完成后，训练脚本会自动生成汇总结果。也可以单独对已有训练结果重新汇总。
-
-premix 汇总示例：
+### 7.2 汇总生产训练结果
 
 ```bash
-python -m scripts.rl.train --summarize_only --summary_root outputs/premix_train --summary_metric eval_metrics.R_mean --summary_out_dir outputs/premix_train/seed_sweep_summary_manual
+python -m scripts.rl.train \
+  --summarize_only \
+  --summary_root outputs/production_train \
+  --summary_metric eval_metrics.R_mean \
+  --summary_out_dir outputs/production_train/seed_sweep_summary_manual
 ```
 
-production 汇总示例：
-
-```bash
-python -m scripts.rl.train --summarize_only --summary_root outputs/production_train --summary_metric eval_metrics.R_mean --summary_out_dir outputs/production_train/seed_sweep_summary_manual
-```
-
-参数说明如下。
-
-| 参数                  | 含义             | 推荐设置                       |
-| ------------------- | -------------- | -------------------------- |
-| `--summarize_only`  | 只做已有结果汇总，不重新训练 | 需要单独汇总时使用                  |
-| `--summary_root`    | 需要扫描的训练结果根目录   | 指向包含 `seed1/seed2/...` 的目录 |
-| `--summary_metric`  | 用于汇总的指标字段      | 推荐 `eval_metrics.R_mean`   |
-| `--summary_out_dir` | 汇总结果输出目录       | 建议放在训练目录下                  |
-
-汇总输出通常包括：
+`--summary_metric` 可以根据论文关注重点调整。常用指标包括：
 
 ```text
-seed_sweep_table.csv
-seed_sweep_summary.json
-seed_sweep_boxplot.png
+eval_metrics.R_mean
+eval_metrics.density_iae_mean
+eval_metrics.level_iae_mean
 ```
 
----
+## 8. 成对评估
 
-## 8. 评估入口
+评估脚本会在相同随机工况下分别运行 RL 缩放策略和基准 PID 控制器，从而进行公平的成对比较。推荐对训练得到的最佳 checkpoint 单独评估。
 
-评估统一使用：
-
-```text
-python -m scripts.rl.evaluate
-```
-
-评估脚本支持三种方式：
-
-1. `baseline vs RL` 配对评估；
-2. `baseline-only` 评估；
-3. 同时评估 `premix` 和 `production`。
-
-配对评估时，baseline 和 RL 使用相同的工况采样和相同的随机扰动，因此可以比较两者在同一批 scenario 下的差异。
-
----
-
-## 9. premix 正式评估示例
-
-如果使用多 seed 训练，建议分别评估每个 seed 的 `premix_best.pt`，再对评估结果做汇总分析。下面以 `seed1` 为例。
+### 8.1 评估预混策略
 
 ```bash
-python -m scripts.rl.evaluate --mode premix --ckpt outputs/premix_train/seed1/premix_best.pt --N 500 --seed 2026 --device cuda --dt 0.5 --premix_duration 120 --premix_hold 10 --bootstrap_B 2000 --save_full_if_n_le 20 --out_dir outputs/premix_eval/seed1
+python -m scripts.rl.evaluate \
+  --mode premix \
+  --ckpt outputs/premix_train/seed1/premix_best.pt \
+  --out_dir outputs/premix_eval/seed1 \
+  --N 500 \
+  --seed 2026 \
+  --device cuda \
+  --dt 0.5 \
+  --premix_duration 120 \
+  --premix_hold 10 \
+  --bootstrap_B 2000 \
+  --save_full_if_n_le 20
 ```
 
-参数说明如下。
+### 8.2 评估生产策略
 
-| 参数                       | 含义                       | 推荐设置                           |
-| ------------------------ | ------------------------ | ------------------------------ |
-| `--mode premix`          | 指定评估 premix 工况           | premix 评估固定用 `premix`          |
-| `--ckpt`                 | 待评估的 RL checkpoint       | 通常使用对应 seed 的 `premix_best.pt` |
-| `--N 500`                | Monte Carlo 评估 episode 数 | 正式评估推荐 500；资源充足可设 1000         |
-| `--seed 2026`            | 评估随机种子                   | 推荐固定一个与训练 seed 不同的评估 seed      |
-| `--device cuda`           | 模型推理设备                   | 无 GPU 用 `cpu`；有 CUDA 可用 `cuda` |
-| `--dt 0.5`               | 仿真步长                     | 应与训练和论文设定一致                    |
-| `--premix_duration 120`  | premix 评估仿真时长            | 应与训练设定一致                       |
-| `--premix_hold 10`       | premix 初始保持时长            | 应与训练设定一致                       |
-| `--bootstrap_B 2000`     | bootstrap 重采样次数          | 正式结果推荐 2000；更稳健可设 5000         |
-| `--save_full_if_n_le 20` | 当 `N` 不超过该值时保存完整轨迹       | 正式大规模评估建议 20，避免保存过多轨迹          |
-| `--out_dir`              | 评估结果输出目录                 | 推荐按 mode 和 seed 单独建目录          |
+```bash
+python -m scripts.rl.evaluate \
+  --mode production \
+  --ckpt outputs/production_train/seed1/production_best.pt \
+  --out_dir outputs/production_eval/seed1 \
+  --N 500 \
+  --seed 2026 \
+  --device cuda \
+  --dt 0.5 \
+  --production_duration 240 \
+  --bootstrap_B 2000 \
+  --save_full_if_n_le 20
+```
 
-典型输出包括：
+### 8.3 评估输出
+
+典型评估输出包括：
 
 ```text
 outputs/premix_eval/seed1/premix/
@@ -293,218 +292,213 @@ outputs/premix_eval/seed1/premix/
 ├── premix_paired_cases.csv
 ├── premix_rl_scales.csv
 ├── premix_paired_compare.npz
-├── premix_delta_return_hist.png
-├── premix_delta_vs_tau_mix.png
-├── premix_delta_vs_delay.png
-├── premix_delta_tau_bucket.png
-├── premix_scale_boxplot.png
-└── premix_scales_vs_tau_mix.png
+└── plots/
+    ├── premix_baseline_reward_distribution.png
+    ├── premix_rl_reward_distribution.png
+    ├── premix_delta_reward_hist.png
+    ├── premix_delta_density_iae_hist.png
+    ├── premix_delta_reward_scatter.png
+    ├── premix_delta_density_iae_scatter.png
+    ├── premix_scale_boxplot.png
+    └── premix_scale_scatter.png
 ```
 
----
+生产情景还会额外生成与外输排量相关的分析图，例如：
 
-## 10. production 正式评估示例
+```text
+production_delta_vs_qs.png
+production_delta_qs_bucket.png
+```
 
-下面以 `seed1` 的 production checkpoint 为例。
+主要输出文件含义如下：
+
+| 文件 | 含义 |
+|---|---|
+| `*_paired_compare_summary.json` | 成对评估核心统计结果，包括均值、胜率、改进量和 bootstrap 置信区间 |
+| `*_paired_compare_report.txt` | 便于直接阅读的文本版评估报告 |
+| `*_paired_cases.csv` | 每个测试情景的基准 PID 与 RL 策略表现 |
+| `*_rl_scales.csv` | 每个测试情景中 RL 策略输出的 PID 缩放因子 |
+| `*_paired_compare.npz` | 评估数组数据，便于后续重新作图或统计 |
+| `plots/` | 评估分布图、成对改进图和缩放因子图 |
+
+## 9. 补充实验
+
+`reviewer_lightweight_experiments.py` 用于生成补充实验结果，主要包括：
+
+```text
+1. 单次策略推理耗时测试
+2. 训练区间外极端工况泛化测试
+```
+
+该脚本只加载已经训练好的 checkpoint，不重新训练策略。
+
+### 9.1 同时运行预混和生产补充实验
 
 ```bash
-python -m scripts.rl.evaluate --mode production --ckpt outputs/production_train/seed1/production_best.pt --N 500 --seed 2026 --device cuda --dt 0.5 --production_duration 240 --bootstrap_B 2000 --save_full_if_n_le 20 --out_dir outputs/production_eval/seed1
+python -m scripts.rl.reviewer_lightweight_experiments \
+  --mode both \
+  --premix_ckpt outputs/premix_train/seed1/premix_best.pt \
+  --production_ckpt outputs/production_train/seed1/production_best.pt \
+  --out_dir outputs/reviewer_lightweight \
+  --N 1000 \
+  --seed 2026 \
+  --device cuda \
+  --dt 0.5 \
+  --premix_duration 120 \
+  --premix_hold 10 \
+  --production_duration 240 \
+  --timing_repeats 10000
 ```
 
-参数说明如下。
+### 9.2 只运行推理耗时测试
 
-| 参数                          | 含义                       | 推荐设置                               |
-| --------------------------- | ------------------------ | ---------------------------------- |
-| `--mode production`         | 指定评估 production 工况       | production 评估固定用 `production`      |
-| `--ckpt`                    | 待评估的 RL checkpoint       | 通常使用对应 seed 的 `production_best.pt` |
-| `--N 500`                   | Monte Carlo 评估 episode 数 | 正式评估推荐 500；资源充足可设 1000             |
-| `--seed 2026`               | 评估随机种子                   | 推荐固定一个与训练 seed 不同的评估 seed          |
-| `--device cuda`              | 模型推理设备                   | 无 GPU 用 `cpu`；有 CUDA 可用 `cuda`     |
-| `--dt 0.5`                  | 仿真步长                     | 应与训练和论文设定一致                        |
-| `--production_duration 240` | production 评估仿真时长        | 应与训练设定一致                           |
-| `--bootstrap_B 2000`        | bootstrap 重采样次数          | 正式结果推荐 2000；更稳健可设 5000             |
-| `--save_full_if_n_le 20`    | 当 `N` 不超过该值时保存完整轨迹       | 正式大规模评估建议 20                       |
-| `--out_dir`                 | 评估结果输出目录                 | 推荐按 mode 和 seed 单独建目录              |
+```bash
+python -m scripts.rl.reviewer_lightweight_experiments \
+  --mode both \
+  --premix_ckpt outputs/premix_train/seed1/premix_best.pt \
+  --production_ckpt outputs/production_train/seed1/production_best.pt \
+  --out_dir outputs/reviewer_lightweight_timing_only \
+  --device cuda \
+  --no_ood
+```
+
+### 9.3 只运行极端工况泛化测试
+
+```bash
+python -m scripts.rl.reviewer_lightweight_experiments \
+  --mode both \
+  --premix_ckpt outputs/premix_train/seed1/premix_best.pt \
+  --production_ckpt outputs/production_train/seed1/production_best.pt \
+  --out_dir outputs/reviewer_lightweight_ood_only \
+  --N 1000 \
+  --seed 2026 \
+  --device cuda \
+  --dt 0.5 \
+  --premix_duration 120 \
+  --premix_hold 10 \
+  --production_duration 240 \
+  --no_timing
+```
+
+### 9.4 补充实验输出
 
 典型输出包括：
 
 ```text
-outputs/production_eval/seed1/production/
-├── production_paired_compare_summary.json
-├── production_paired_compare_report.txt
-├── production_paired_cases.csv
-├── production_rl_scales.csv
-├── production_paired_compare.npz
-├── production_delta_return_hist.png
-├── production_delta_vs_tau_mix.png
-├── production_delta_vs_delay.png
-├── production_delta_vs_qs.png
-├── production_delta_qs_bucket.png
-├── production_scale_boxplot.png
-└── production_scales_vs_tau_mix.png
+outputs/reviewer_lightweight/
+├── premix_single_inference_timing.csv
+├── premix_single_inference_timing.json
+├── premix_ood_cases.csv
+├── premix_ood_summary.csv
+├── premix_ood_summary.json
+├── premix_reviewer_lightweight_result.json
+├── production_single_inference_timing.csv
+├── production_single_inference_timing.json
+├── production_ood_cases.csv
+├── production_ood_summary.csv
+├── production_ood_summary.json
+├── production_reviewer_lightweight_result.json
+└── reviewer_lightweight_all_results.json
 ```
 
----
+推理耗时测试记录策略网络单次前向推理时间，不包含闭环仿真时间。
 
-## 11. baseline-only 正式评估示例
+极端工况泛化测试默认包含：
 
-如果只需要评估基准控制器，不加载 RL checkpoint，可以使用 `--baseline_only`。
+| 情景 | 极端工况 |
+|---|---|
+| 预混、生产 | 混合时间常数 `100`--`150 s` |
+| 预混、生产 | 观测时滞 `20`--`30 s` |
+| 生产 | 外输排量 `1.5`--`2.0 m^3/min` |
 
-同时评估 premix 与 production：
+如需额外测试组合极端工况，可加入：
 
 ```bash
-python -m scripts.rl.evaluate --mode both --baseline_only --N 500 --seed 2026 --device cpu --dt 0.5 --premix_duration 120 --premix_hold 10 --production_duration 240 --bootstrap_B 2000 --save_full_if_n_le 20 --out_dir outputs/baseline_eval
+--include_combined_extreme
 ```
 
-参数说明如下。
+## 10. 常用参数说明
 
-| 参数                                | 含义                             | 推荐设置                        |
-| --------------------------------- | ------------------------------ | --------------------------- |
-| `--mode both`                     | 同时评估 premix 和 production       | baseline-only 总体验证可用 `both` |
-| `--baseline_only`                 | 不加载 RL checkpoint，只评估 baseline | 基准方法评估时使用                   |
-| `--N 500`                         | Monte Carlo episode 数          | 正式评估推荐 500；资源充足可设 1000      |
-| `--seed 2026`                     | 评估随机种子                         | 推荐固定                        |
-| `--device cpu`                    | 推理设备                           | baseline-only 通常用 `cpu` 即可  |
-| `--dt 0.5`                        | 仿真步长                           | 与训练和论文设定一致                  |
-| `--premix_duration 120`           | premix 仿真时长                    | 与 premix 实验设定一致             |
-| `--premix_hold 10`                | premix 初始保持时长                  | 与 premix 实验设定一致             |
-| `--production_duration 240`       | production 仿真时长                | 与 production 实验设定一致         |
-| `--bootstrap_B 2000`              | bootstrap 次数                   | 推荐 2000                     |
-| `--save_full_if_n_le 20`          | 小样本时保存完整轨迹                     | 正式大样本评估通常不会触发               |
-| `--out_dir outputs/baseline_eval` | 输出目录                           | 推荐单独保存 baseline 结果          |
+### 10.1 训练参数
 
-baseline-only 模式下，输出仍然包含 paired summary、report、CSV、NPZ 和图表。由于不加载 RL 模型，RL 分支会使用 baseline 参数，因此两者的 paired delta 通常为 0。
+| 参数 | 说明 |
+|---|---|
+| `--mode` | 运行情景，可选 `premix`、`production`、`both` |
+| `--seed` | 单个随机种子 |
+| `--seeds` | 多个随机种子，优先级高于 `--seed` |
+| `--device` | 计算设备，例如 `cpu` 或 `cuda` |
+| `--updates` | PPO-bandit 更新轮数 |
+| `--batch_episodes` | 每轮更新采样的情景数量 |
+| `--eval_every` | 每隔多少轮进行一次评估 |
+| `--eval_episodes` | 每次训练中评估使用的情景数量 |
+| `--save_every` | checkpoint 保存间隔 |
+| `--best_metric` | 选择最佳 checkpoint 的指标，默认使用 `R_mean` |
+| `--num_workers` | 并行采样进程数 |
+| `--ckpt_dir` | checkpoint 和训练输出目录 |
+| `--dt` | 控制周期，单位为秒 |
+| `--premix_duration` | 预混情景仿真时长 |
+| `--premix_hold` | 预混情景前期保持时间 |
+| `--production_duration` | 生产情景仿真时长 |
 
----
+### 10.2 评估参数
 
-## 12. 推荐实验流程
+| 参数 | 说明 |
+|---|---|
+| `--mode` | 评估情景，可选 `premix`、`production`、`both` |
+| `--ckpt` | 单个情景对应的 checkpoint 路径 |
+| `--ckpt_dir` | 同时评估两个情景时的 checkpoint 目录 |
+| `--out_dir` | 评估输出目录 |
+| `--N` | 成对评估情景数量 |
+| `--episodes` | `--N` 的别名 |
+| `--seed` | 评估随机种子 |
+| `--device` | 计算设备 |
+| `--bootstrap_B` | bootstrap 重采样次数 |
+| `--save_full_if_n_le` | 当评估情景数不超过该值时保存完整轨迹 |
+| `--no_plots` | 只保存数值结果，不生成图 |
 
-建议完整实验按以下顺序执行。
+### 10.3 补充实验参数
 
-第一步，训练 premix：
+| 参数 | 说明 |
+|---|---|
+| `--premix_ckpt` | 预混策略 checkpoint 路径 |
+| `--production_ckpt` | 生产策略 checkpoint 路径 |
+| `--timing_repeats` | 推理耗时测试重复次数 |
+| `--timing_warmup` | 推理耗时测试预热次数 |
+| `--include_combined_extreme` | 是否加入组合极端工况测试 |
+| `--no_timing` | 不运行推理耗时测试 |
+| `--no_ood` | 不运行极端工况泛化测试 |
+
+## 11. 实验建议流程
+
+建议保持以下原则：
+
+1. 训练和评估使用相同的 `dt`、`premix_duration`、`premix_hold` 和 `production_duration`。
+2. 主结果优先报告独立评估脚本得到的成对比较结果，而不是训练过程中的在线评估结果。
+3. 多 seed 训练用于观察策略稳定性；论文主表可选择最佳 seed 或多 seed 汇总，但需要在正文中说明选择规则。
+4. 成对评估应固定 `--seed` 和 `--N`，便于复现实验结果。
+5. 如果需要展示完整轨迹图，可以适当减小 `--N` 或设置 `--save_full_if_n_le`，避免保存过多轨迹文件。
+6. 补充实验中的推理耗时只反映策略参数整定环节开销，不等同于完整闭环仿真耗时。
+
+## 12. 最小完整命令序列
+
+下面给出一组从训练到评估再到补充实验的最小完整命令。路径可根据实际 seed 和输出目录调整。
 
 ```bash
 python -m scripts.rl.train --mode premix --seeds 1 2 3 4 5 --device cuda --updates 1000 --batch_episodes 64 --eval_every 20 --eval_episodes 100 --save_every 50 --num_workers 4 --dt 0.5 --premix_duration 120 --premix_hold 10 --ckpt_dir outputs/premix_train
 ```
 
-第二步，训练 production：
-
 ```bash
 python -m scripts.rl.train --mode production --seeds 1 2 3 4 5 --device cuda --updates 1500 --batch_episodes 64 --eval_every 20 --eval_episodes 100 --save_every 50 --num_workers 4 --dt 0.5 --production_duration 240 --ckpt_dir outputs/production_train
 ```
 
-第三步，评估 premix 每个 seed 的 best checkpoint。以 seed1 为例：
-
 ```bash
-python -m scripts.rl.evaluate --mode premix --ckpt outputs/premix_train/seed1/premix_best.pt --N 500 --seed 2026 --device cuda --dt 0.5 --premix_duration 120 --premix_hold 10 --bootstrap_B 2000 --save_full_if_n_le 20 --out_dir outputs/premix_eval/seed1
+python -m scripts.rl.evaluate --mode premix --ckpt outputs/premix_train/seed1/premix_best.pt --out_dir outputs/premix_eval/seed1 --N 500 --seed 2026 --device cuda --dt 0.5 --premix_duration 120 --premix_hold 10 --bootstrap_B 2000 --save_full_if_n_le 20
 ```
 
-第四步，评估 production 每个 seed 的 best checkpoint。以 seed1 为例：
-
 ```bash
-python -m scripts.rl.evaluate --mode production --ckpt outputs/production_train/seed1/production_best.pt --N 500 --seed 2026 --device cuda --dt 0.5 --production_duration 240 --bootstrap_B 2000 --save_full_if_n_le 20 --out_dir outputs/production_eval/seed1
+python -m scripts.rl.evaluate --mode production --ckpt outputs/production_train/seed1/production_best.pt --out_dir outputs/production_eval/seed1 --N 500 --seed 2026 --device cuda --dt 0.5 --production_duration 240 --bootstrap_B 2000 --save_full_if_n_le 20
 ```
 
-第五步，评估 baseline：
-
 ```bash
-python -m scripts.rl.evaluate --mode both --baseline_only --N 500 --seed 2026 --device cpu --dt 0.5 --premix_duration 120 --premix_hold 10 --production_duration 240 --bootstrap_B 2000 --save_full_if_n_le 20 --out_dir outputs/baseline_eval
+python -m scripts.rl.reviewer_lightweight_experiments --mode both --premix_ckpt outputs/premix_train/seed1/premix_best.pt --production_ckpt outputs/production_train/seed1/production_best.pt --out_dir outputs/reviewer_lightweight --N 1000 --seed 2026 --device cuda --dt 0.5 --premix_duration 120 --premix_hold 10 --production_duration 240 --timing_repeats 10000
 ```
-
----
-
-## 13. 结果文件说明
-
-### 13.1 训练结果
-
-训练结果通常包含：
-
-| 文件                     | 含义                          |
-| ---------------------- | --------------------------- |
-| `*_best.pt`            | 当前 seed 下评估表现最好的 checkpoint |
-| `*_ppo_bandit_*.pt`    | 按保存间隔保存的 checkpoint         |
-| `*_summary.json`       | 单个 seed 的训练与评估摘要            |
-| `*_metrics_series.npz` | 训练过程中的 reward、loss、评估指标序列   |
-| `*.png`                | 训练曲线和评估指标曲线                 |
-
-### 13.2 多 seed 汇总结果
-
-多 seed 汇总通常包含：
-
-| 文件                        | 含义                    |
-| ------------------------- | --------------------- |
-| `seed_sweep_table.csv`    | 每个 seed 的关键指标表        |
-| `seed_sweep_summary.json` | 多 seed 均值、标准差、最小值、最大值 |
-| `seed_sweep_boxplot.png`  | 多 seed 指标箱线图          |
-
-### 13.3 评估结果
-
-评估结果通常包含：
-
-| 文件                              | 含义                                |
-| ------------------------------- | --------------------------------- |
-| `*_paired_compare_summary.json` | 配对评估摘要                            |
-| `*_paired_compare_report.txt`   | 可读文本报告                            |
-| `*_paired_cases.csv`            | 每个 scenario 的 baseline/RL 指标和扰动参数 |
-| `*_rl_scales.csv`               | RL 输出的 PID/FF 缩放因子                |
-| `*_paired_compare.npz`          | 数组形式保存的评估结果                       |
-| `*_delta_return_hist.png`       | RL 相对 baseline 的 return 差异分布      |
-| `*_delta_vs_tau_mix.png`        | return 差异与混合时间常数关系                |
-| `*_delta_vs_delay.png`          | return 差异与观测延迟关系                  |
-| `*_scale_boxplot.png`           | RL 输出缩放因子的分布                      |
-| `*_scales_vs_tau_mix.png`       | 缩放因子与混合时间常数关系                     |
-
-production 模式还会额外输出：
-
-| 文件                               | 含义                 |
-| -------------------------------- | ------------------ |
-| `production_delta_vs_qs.png`     | return 差异与目标排量关系   |
-| `production_delta_qs_bucket.png` | 不同排量区间下的 return 差异 |
-
----
-
-## 14. 常用参数建议
-
-### 14.1 训练参数
-
-| 参数                 |    小规模调试 |      正式实验推荐 |
-| ------------------ | -------: | ----------: |
-| `--updates`        |     2–20 |   1000–3000 |
-| `--batch_episodes` |      2–8 |      64–128 |
-| `--eval_every`     |      1–5 |       20–50 |
-| `--eval_episodes`  |     2–10 |     100–200 |
-| `--save_every`     |      1–5 |      50–100 |
-| `--num_workers`    |        0 |         4–8 |
-| `--seeds`          | 1 个 seed | 至少 5 个 seed |
-
-### 14.2 评估参数
-
-| 参数                    | 小规模调试 |               正式实验推荐 |
-| --------------------- | ----: | -------------------: |
-| `--N`                 |  2–20 |             500–1000 |
-| `--bootstrap_B`       |   100 |            2000–5000 |
-| `--save_full_if_n_le` |  2–20 |                   20 |
-| `--seed`              | 任意固定值 | 固定一个独立评估 seed，如 2026 |
-
-### 14.3 仿真参数
-
-| 参数                      | 含义                | 推荐                |
-| ----------------------- | ----------------- | ----------------- |
-| `--dt`                  | 仿真步长              | 推荐 0.5，并与论文实验保持一致 |
-| `--premix_duration`     | premix 单次仿真时长     | 推荐 120 s          |
-| `--premix_hold`         | premix 初始保持时长     | 推荐 5–10 s         |
-| `--production_duration` | production 单次仿真时长 | 推荐 240 s          |
-
----
-
-
-
-## 15. 注意事项
-
-1. 所有训练和评估命令建议在项目根目录执行。
-2. 推荐使用 `python -m scripts.rl.train` 和 `python -m scripts.rl.evaluate`，避免直接运行脚本文件。
-3. 正式训练时建议使用多 seed，并保存每个 seed 的 best checkpoint。
-4. 正式评估时建议使用与训练不同的固定评估 seed。
-5. `premix` 与 `production` 的 `dt`、duration 等仿真参数应在训练和评估中保持一致。
-6. 如果出现 `RuntimeWarning: Mean of empty slice`，通常表示某些指标在当前仿真设置下全为 NaN，例如 settling time 未达到阈值；该 warning 不一定表示程序失败。
-7. 结果文件建议统一保存在 `outputs/` 下，避免污染源码目录。
